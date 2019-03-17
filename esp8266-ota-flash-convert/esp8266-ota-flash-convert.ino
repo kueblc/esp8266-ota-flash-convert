@@ -163,12 +163,70 @@ void handleFlash2URL(){
   }
 }
 
+// from https://www.esp8266.com/viewtopic.php?p=76317#p76317
+
+const uint32 esp_init_data_default[] = {
+  0x02040005,0x02050505,0x05040005,0x05050405,0xFFFDFE04,0xE0F0F0F0,
+  0x0AE1E0E0,0x00F8FFFF,0x4E52F8F8,0x3840444A,0x01010000,0x03030302,
+  0x00000001,0x00020000,0x00000000,0x00000000,0x000A0AE1,0x00000000,
+  0x93010000,0x00000043,0x00000000,0x00000000,0x00000000,0x00000000,
+  0x00000000,0x00000000,0x00000000,0x00000000,0x00010000,0x00000000,
+  0x00000000,0x00000000};
+
+void user_rf_pre_init() {
+  enum flash_size_map size_map = system_get_flash_size_map();
+   uint32 rf_cal_sec = 0, addr, rfCalData, i;
+  os_printf("\nUser preinit: ");
+   switch (size_map) {
+      case FLASH_SIZE_4M_MAP_256_256:
+         rf_cal_sec = 128 - 5;
+         break;
+
+      case FLASH_SIZE_8M_MAP_512_512:
+         rf_cal_sec = 256 - 5;
+         break;
+
+      case FLASH_SIZE_16M_MAP_512_512:
+      case FLASH_SIZE_16M_MAP_1024_1024:
+         rf_cal_sec = 512 - 5;
+         break;
+
+      case FLASH_SIZE_32M_MAP_512_512:
+      case FLASH_SIZE_32M_MAP_1024_1024:
+         rf_cal_sec = 1024 - 5;
+         break;
+
+      default:
+         rf_cal_sec = 0;
+         break;
+   }
+  addr = ((rf_cal_sec) * SPI_FLASH_SEC_SIZE)+SPI_FLASH_SEC_SIZE;
+
+  for (i=0; i<sizeof(esp_init_data_default)/4; i++) {
+    addr+=(i*4);
+    spi_flash_read(addr, &rfCalData, 4);
+    if (rfCalData != esp_init_data_default[i]) {
+      spi_flash_erase_sector(rf_cal_sec);
+      spi_flash_erase_sector(rf_cal_sec+1);
+      spi_flash_erase_sector(rf_cal_sec+2);
+      addr = ((rf_cal_sec) * SPI_FLASH_SEC_SIZE)+SPI_FLASH_SEC_SIZE;
+      os_printf("Storing rfcal init data @ address=0x%08X\n", addr);
+      spi_flash_write(addr, (uint32 *)esp_init_data_default, sizeof(esp_init_data_default));
+
+      break;
+    } else {
+      os_printf("RF data[%u] is ok\n", i);
+    }
+  }
+}
+
 void handleUndo(){
   uint8_t userBin = system_upgrade_userbin_check();
   String message = "Rebooting into userspace ";
   message += userBin ? "1" : "2";
   server.send(200, "text/plain", message);
 
+  user_rf_pre_init();
   system_upgrade_flag_set(UPGRADE_FLAG_FINISH);
   system_upgrade_reboot();
 }
